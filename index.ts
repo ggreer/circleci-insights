@@ -1,24 +1,29 @@
+import * as fs from 'fs';
+
 import * as fetch from 'node-fetch';
 
 // Usage: CIRCLECI_TOKEN=12345 CIRCLECI_PROJECT_SLUG=github/orgname/reponame yarn start
 
 const project_slug = process.env.CIRCLECI_PROJECT_SLUG;
+const reporting_window = 'last-30-days';
 const headers = {
   'Circle-Token': process.env.CIRCLECI_TOKEN,
 };
 
+const failed_tests = {};
+
 const failing_tests: Record<string, number> = {};
 
 async function getData() {
-  console.log(`https://circleci.com/api/v2/insights/${project_slug}/workflows?branch=master&reporting-window=last-30-days`);
-  const workflows_res = await fetch(`https://circleci.com/api/v2/insights/${project_slug}/workflows?branch=master&reporting-window=last-30-days`, {
+  console.log(`https://circleci.com/api/v2/insights/${project_slug}/workflows?branch=master&reporting-window=${reporting_window}`);
+  const workflows_res = await fetch(`https://circleci.com/api/v2/insights/${project_slug}/workflows?branch=master&reporting-window=${reporting_window}`, {
     headers,
   });
   const workflows = await workflows_res.json();
 
   for (const workflow of workflows.items) {
     console.log(`workflow ${workflow.name} success rate: ${workflow.metrics.success_rate * 100}%`);
-    const jobs_res = await fetch(`https://circleci.com/api/v2/insights/${project_slug}/workflows/${workflow.name}/jobs?branch=master&reporting-window=last-30-days`, {
+    const jobs_res = await fetch(`https://circleci.com/api/v2/insights/${project_slug}/workflows/${workflow.name}/jobs?branch=master&reporting-window=${reporting_window}`, {
       headers,
     });
     const jobs = await jobs_res.json();
@@ -27,9 +32,9 @@ async function getData() {
       console.log(`job ${job.name} success rate: ${job.metrics.success_rate * 100}%`);
     }
 
-    console.log(`https://circleci.com/api/v2/insights/${project_slug}/workflows/${workflow.name}/jobs/${workflow.name}?branch=master&reporting-window=last-30-days`);
+    console.log(`https://circleci.com/api/v2/insights/${project_slug}/workflows/${workflow.name}/jobs/${workflow.name}?branch=master&reporting-window=${reporting_window}`);
     // TODO: check next_page_token and re-request until it's empty
-    const runs_res = await fetch(`https://circleci.com/api/v2/insights/${project_slug}/workflows/${workflow.name}?branch=master&reporting-window=last-30-days`, {
+    const runs_res = await fetch(`https://circleci.com/api/v2/insights/${project_slug}/workflows/${workflow.name}?branch=master&reporting-window=${reporting_window}`, {
       headers,
     });
     const runs_data = await runs_res.json();
@@ -51,6 +56,13 @@ async function getData() {
             continue;
           }
           console.log(test);
+          if (!failed_tests[workflow.name]) {
+            failed_tests[workflow.name] = {};
+          }
+          if (!failed_tests[workflow.name][failed_run.id]) {
+            failed_tests[workflow.name][failed_run.id] = {};
+          }
+          failed_tests[workflow.name][failed_run.id][failed_job.job_number] = test;
           if (!failing_tests[test.name]) {
             failing_tests[test.name] = 0;
           }
@@ -63,6 +75,7 @@ async function getData() {
   for (const test of sorted_tests) {
     console.log(`${test[1]} failures ${test[0]}`);
   }
+  fs.writeFileSync("test_failures.json", JSON.stringify(failed_tests, null, 2));
 }
 
 getData();
